@@ -1,6 +1,7 @@
 #Eliseo Izazaga
+# this is a modification to the original and will account for 2 cameras, one running the vendor panel
+#and the other running the GEN5 panel, 
 import time
-#this application will chart and plot the battery charging mechanism in the GEN 5 cameras through the
 #serial port and matplotlib
 import sys
 import glob
@@ -116,7 +117,7 @@ def sanitizePMData(dirtyPMdata):
     #print("\n")
     #print("\n")
     #print("\n")
-    #print(dirtyPMdata)
+    print(dirtyPMdata)
     #print("\n")
     #print("\n")
     #print("\n")
@@ -202,14 +203,17 @@ def openSerialPort(COMDEVICENUMBER):
     return newport
 
 def utilityBatteryFunction(targetCam):  #will return pm 05 data in a comma delimited list, the list will become string then written to the file, 
-    #targetCam.flush()
+    targetCam.reset_input_buffer()
+    targetCam.reset_output_buffer()
+    #sendCMDToEFR(TESTCAM1, "pm 05")
     #print("command sent: " + "pm 05")
     data = targetCam.read(500)
+    #print("THIS IS SUPPOSED TO INCLUDE HEADER: ")
     #print(data)
     stringData = str(data)
     #print(stringData)
     while(stringData.find('$') == -1):
-        #print("in first loop")
+        #print("THIS IS SUPPOSED TO IGNORE HEADER:  ")
         data = targetCam.read_until('\n') #reads until new line 
         #print(data)
         stringData = str(data)
@@ -280,31 +284,33 @@ def readBQregValues(targetCam, regValuesIn):
 
 
 
+
 if __name__ == '__main__':
     TESTCAM1 = openSerialPort("COM10")
+    DIR = 'UP'
+    VINDPM = "0x95"
     print("Starting Main Application: ")
     luxMeter = Quantum()
-    mainLog = open("Dynamic VINDPM SOLAR TEST WITH VENDOR PANEL v2.txt", "a")
+    mainLog = open("Dynamic VINDPM SOLAR TEST WITH VENDOR PANEL v4.1 3800mV Disconnect.txt", "a")
     mainHeader = "Time,BAT_TYPE,CHG_TYPE,PM_ST,SYS_ST,VOLT,TEMP,PERC,BAT_CURR,INPUT_CURR,VBUS,INPUT_VOLT,VBATT,CHG_VOLT,CHG_CURR,CHG_STATUS,OP_STATUS,JEITA_VOLT,JEITA_CURR,IMAX,TrueRemQ,micromoles,HEX READ FROM REG0D,HEX SENT TO REG0D/VINDPM, POWER, \n" # needs to be replaced with proper header
     mainLog.write(mainHeader) 
     #micromoles = luxMeter.get_micromoles()
     #micromoles = f"{micromoles:4f}"
-
-    sendCMDToEFR(TESTCAM1, "pm 05")
+    configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
+    sendCMDToEFR(TESTCAM1, "pm 05 05 05 05 05")
     time.sleep(3)
-
     pmData = utilityBatteryFunction(TESTCAM1)
     #print(pmData)
     pmData = sanitizePMData(pmData)
     #print(pmData)
     tempPMData = str(pmData).split(",") #needs just IBAT
-    print(tempPMData)
+    #print(tempPMData)
     IBATTold = int(tempPMData[7])
     VBUSold = int(tempPMData[9])
-    print("vbus old pos 9 " +str(VBUSold))
+    #print("vbus old pos 9 " +str(VBUSold))
     powerold = IBATTold * VBUSold
     print(powerold)
-    VINDPM = "0x"
+
     timeStamp = time.time()
     timeStamp = datetime.datetime.fromtimestamp(timeStamp).strftime('%Y-%m-%d %H:%M:%S')
     timeStamp = str(timeStamp + ",")
@@ -313,13 +319,13 @@ if __name__ == '__main__':
     reg0D = readBQregValues(TESTCAM1, "rbq 0x0d")
     #powerNew = powerold #power new not yet set
     mainLog.write(timeStamp + pmData+ "," + str(micromoles)+ "," + reg0D + "," + VINDPM + "," + str(powerold)+ "\n")
-    configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
+    
     mainLog.close()
     while(True):
         #print("inside true statement")
-        mainLog = open("Dynamic VINDPM SOLAR TEST WITH VENDOR PANEL v2.txt", "a")
+        mainLog = open("Dynamic VINDPM SOLAR TEST WITH VENDOR PANEL v4.1 3800mV Disconnect.txt", "a")
         counter = 0
-        while(counter <= 10):
+        while(counter <= 35):
             micromoles = luxMeter.get_micromoles()
             micromoles = f"{micromoles:4f}"
             print(micromoles)
@@ -335,6 +341,12 @@ if __name__ == '__main__':
         IBATTnew = int(tempPMdataNew[7])
         VBUSnew = int(tempPMdataNew[9])
         powerNew = IBATTnew * VBUSnew
+        #while(IBATTnew < 0):
+        #    print((str(IBATTnew) + "neg IBATT getting new IBAT"))
+        #    IBATTnew = int(tempPMdataNew[7])
+        #    VBUSnew = int(tempPMdataNew[9])
+        #    powerNew = IBATTnew * VBUSnew
+
         print("Calculated newpower: "+str(powerNew))
         timeStamp = time.time()
         timeStamp = datetime.datetime.fromtimestamp(timeStamp).strftime('%Y-%m-%d %H:%M:%S')
@@ -345,18 +357,34 @@ if __name__ == '__main__':
         #reg0D 
         reg0D = readBQregValues(TESTCAM1, "rbq 0x0d")
         mainLog.write(timeStamp + pmData+ "," + str(micromoles)+ "," + reg0D + ",")
-        if(powerNew >= powerold and IBATTnew > 0):
-            VINDPM = add100mV(VINDPM)
-            print("incremented "+VINDPM)
-            configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
-            powerold = powerNew
-            mainLog.write(VINDPM + "," +str(powerold)+ "\n")
+        if((powerNew >= powerold) and (IBATTnew > 0)):
+            if(DIR == 'UP'):
+                VINDPM = add100mV(VINDPM)
+                print("incremented "+VINDPM)
+                configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
+                powerold = powerNew
+                mainLog.write(VINDPM + "," +str(powerold)+ "\n")
+            else:
+                VINDPM = sub100mV(VINDPM)
+                print("decremented "+VINDPM)
+                configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
+                powerold = powerNew
+                mainLog.write(VINDPM + ","+str(powerold)+ "\n")
         else:
-            VINDPM = sub100mV(VINDPM)
-            print("decremented "+VINDPM)
-            configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
-            powerold = powerNew
-            mainLog.write(VINDPM + ","+str(powerold)+ "\n")
+            if(DIR == 'UP'):
+                VINDPM = sub100mV(VINDPM)
+                print("decremented "+VINDPM)
+                configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
+                powerold = powerNew
+                DIR = 'DOWN'
+                mainLog.write(VINDPM + ","+str(powerold)+ "\n")
+            else:
+                VINDPM = add100mV(VINDPM)
+                print("incremented "+VINDPM)
+                configBQregValues(TESTCAM1, "wbq 0x0d "+VINDPM)
+                powerold = powerNew
+                DIR = 'UP'
+                mainLog.write(VINDPM + "," +str(powerold)+ "\n")
         mainLog.close()
 
 
